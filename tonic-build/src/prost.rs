@@ -1,6 +1,6 @@
 use super::{client, server};
 use proc_macro2::TokenStream;
-use prost_build::{Config, Method, Service};
+use prost_build::{Config, Method as ProstMethod, Service as ProstService};
 use quote::ToTokens;
 use std::ffi::OsString;
 use std::io;
@@ -24,6 +24,7 @@ pub fn configure() -> Builder {
         format: true,
         emit_package: true,
         protoc_args: Vec::new(),
+        codec_path: DEFAULT_PROST_CODEC_PATH.to_string(),
     }
 }
 
@@ -44,15 +45,43 @@ pub fn compile_protos(proto: impl AsRef<Path>) -> io::Result<()> {
     Ok(())
 }
 
-const PROST_CODEC_PATH: &str = "tonic::codec::ProstCodec";
+const DEFAULT_PROST_CODEC_PATH: &str = "tonic::codec::ProstCodec";
+
+struct Service {
+    name: String,
+    package: String,
+    proto_name: String,
+    comments: Vec<String>,
+    methods: Vec<Method>,
+    codec_path: String,
+}
+
+impl Service {
+    fn new(service: ProstService, codec_path: String) -> Service {
+        Service {
+            name: service.name,
+            package: service.package,
+            proto_name: service.proto_name,
+            comments: service.comments.leading,
+            methods: service
+                .methods
+                .into_iter()
+                .map(|v| Method {
+                    inner: v,
+                    codec_path: codec_path.clone(),
+                })
+                .collect(),
+            codec_path,
+        }
+    }
+}
 
 impl crate::Service for Service {
-
     type Method = Method;
     type Comment = String;
 
     fn codec_path(&self) -> &str {
-        PROST_CODEC_PATH
+        &self.codec_path
     }
 
     fn name(&self) -> &str {
@@ -68,7 +97,7 @@ impl crate::Service for Service {
     }
 
     fn comment(&self) -> &[Self::Comment] {
-        &self.comments.leading[..]
+        &self.comments[..]
     }
 
     fn methods(&self) -> &[Self::Method] {
@@ -76,31 +105,36 @@ impl crate::Service for Service {
     }
 }
 
+struct Method {
+    inner: ProstMethod,
+    codec_path: String,
+}
+
 impl crate::Method for Method {
     type Comment = String;
 
     fn codec_path(&self) -> &str {
-        PROST_CODEC_PATH
+        &self.codec_path
     }
 
     fn name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 
     fn identifier(&self) -> &str {
-        &self.proto_name
+        &self.inner.proto_name
     }
 
     fn client_streaming(&self) -> bool {
-        self.client_streaming
+        self.inner.client_streaming
     }
 
     fn server_streaming(&self) -> bool {
-        self.server_streaming
+        self.inner.server_streaming
     }
 
     fn comment(&self) -> &[Self::Comment] {
-        &self.comments.leading[..]
+        &self.inner.comments.leading[..]
     }
 
     fn request_response_name(
@@ -108,24 +142,24 @@ impl crate::Method for Method {
         proto_path: &str,
         compile_well_known_types: bool,
     ) -> (TokenStream, TokenStream) {
-        let request = if (self.input_proto_type.starts_with(".google.protobuf")
+        let request = if (self.inner.input_proto_type.starts_with(".google.protobuf")
             && !compile_well_known_types)
-            || self.input_type.starts_with("::")
+            || self.inner.input_type.starts_with("::")
         {
-            self.input_type.parse::<TokenStream>().unwrap()
+            self.inner.input_type.parse::<TokenStream>().unwrap()
         } else {
-            syn::parse_str::<syn::Path>(&format!("{}::{}", proto_path, self.input_type))
+            syn::parse_str::<syn::Path>(&format!("{}::{}", proto_path, self.inner.input_type))
                 .unwrap()
                 .to_token_stream()
         };
 
-        let response = if (self.output_proto_type.starts_with(".google.protobuf")
+        let response = if (self.inner.output_proto_type.starts_with(".google.protobuf")
             && !compile_well_known_types)
-            || self.output_type.starts_with("::")
+            || self.inner.output_type.starts_with("::")
         {
-            self.output_type.parse::<TokenStream>().unwrap()
+            self.inner.output_type.parse::<TokenStream>().unwrap()
         } else {
-            syn::parse_str::<syn::Path>(&format!("{}::{}", proto_path, self.output_type))
+            syn::parse_str::<syn::Path>(&format!("{}::{}", proto_path, self.inner.output_type))
                 .unwrap()
                 .to_token_stream()
         };
@@ -151,7 +185,8 @@ impl ServiceGenerator {
 }
 
 impl prost_build::ServiceGenerator for ServiceGenerator {
-    fn generate(&mut self, service: prost_build::Service, _buf: &mut String) {
+    fn generate(&mut self, service: ProstService, _buf: &mut String) {
+        let service = Service::new(service, self.builder.codec_path.clone());
         if self.builder.build_server {
             let server = server::generate(
                 &service,
@@ -215,6 +250,7 @@ pub struct Builder {
     pub(crate) emit_package: bool,
     pub(crate) compile_well_known_types: bool,
     pub(crate) protoc_args: Vec<OsString>,
+    pub(crate) codec_path: String,
 
     out_dir: Option<PathBuf>,
     #[cfg(feature = "rustfmt")]
@@ -318,6 +354,15 @@ impl Builder {
     /// This defaults to `false`.
     pub fn compile_well_known_types(mut self, compile_well_known_types: bool) -> Self {
         self.compile_well_known_types = compile_well_known_types;
+        self
+    }
+
+    /// Set the module path to the `tonic::codec::Codec` implementation to use
+    /// to serialize/deserialize the protobuf messages.
+    ///
+    /// This defaults to `tonic::codec::ProstCodec`
+    pub fn codec_path(mut self, codec_path: impl AsRef<str>) -> Self {
+        self.codec_path = codec_path.as_ref().to_string();
         self
     }
 

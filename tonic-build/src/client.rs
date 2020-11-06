@@ -190,10 +190,10 @@ fn generate_client_streaming<T: Method>(method: &T, proto_path: &str, path: Stri
             self.inner.ready().await.map_err(|e| {
                         tonic::Status::new(tonic::Code::Unknown, format!("Service was not ready: {}", e.into()))
             })?;
-            let requests = request.into_streaming_requests();
+            let requests = request.into_streaming_request();
             let codec = #codec_constructor;
             let path = http::uri::PathAndQuery::from_static(#path);
-            self.inner.client_streaming(request.into_streaming_request(), path, codec).await
+            self.inner.client_streaming(requests, path, codec).await
         }
     }
 }

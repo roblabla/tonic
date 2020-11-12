@@ -15,6 +15,7 @@ pub fn configure() -> Builder {
         out_dir: None,
         extern_path: Vec::new(),
         field_attributes: Vec::new(),
+        field_visibilities: Vec::new(),
         type_attributes: Vec::new(),
         proto_path: "super".to_string(),
         #[cfg(feature = "rustfmt")]
@@ -223,6 +224,7 @@ pub struct Builder {
     pub(crate) build_server: bool,
     pub(crate) extern_path: Vec<(String, String)>,
     pub(crate) field_attributes: Vec<(String, String)>,
+    pub(crate) field_visibilities: Vec<(String, prost_build::Visibility)>,
     pub(crate) type_attributes: Vec<(String, String)>,
     pub(crate) proto_path: String,
     pub(crate) codec_path: String,
@@ -279,6 +281,15 @@ impl Builder {
     pub fn field_attribute<P: AsRef<str>, A: AsRef<str>>(mut self, path: P, attribute: A) -> Self {
         self.field_attributes
             .push((path.as_ref().to_string(), attribute.as_ref().to_string()));
+        self
+    }
+
+    /// Add additional visibility to matched messages, enums, and one-offs.
+    ///
+    /// Passed directly to `prost_build::Config.field_visibility`.
+    pub fn field_visibility<P: AsRef<str>>(mut self, path: P, visibility: prost_build::Visibility) -> Self {
+        self.field_visibilities
+            .push((path.as_ref().to_string(), visibility));
         self
     }
 
@@ -343,6 +354,9 @@ impl Builder {
         }
         for (prost_path, attr) in self.field_attributes.iter() {
             config.field_attribute(prost_path, attr);
+        }
+        for (prost_path, attr) in self.field_visibilities.iter() {
+            config.field_visibility(prost_path, *attr);
         }
         for (prost_path, attr) in self.type_attributes.iter() {
             config.type_attribute(prost_path, attr);

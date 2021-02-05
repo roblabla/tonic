@@ -25,6 +25,8 @@ pub fn generate<T: Service>(
         pub mod #client_mod {
             #![allow(unused_variables, dead_code, missing_docs)]
             use tonic::codegen::*;
+            #[allow(unused_imports)]
+            use std::convert::TryFrom;
 
             #service_doc
             #[derive(Debug, Clone)]
